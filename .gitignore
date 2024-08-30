@@ -1,0 +1,7 @@
+/build
+/tests
+/build.sh
+/upload.sh
+/setup.sh
+/initialize.sh
+/*.toml
