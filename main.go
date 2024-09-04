@@ -28,8 +28,9 @@ import (
 
 type Config struct {
 	Server struct {
-		Addr string `toml:"addr"`
-		Key  string `toml:"key"`
+		Addr     string `toml:"addr"`
+		Key      string `toml:"key"`
+		Password string `toml:"password"`
 	} `toml:"server"`
 	Storage struct {
 		Endpoint string `toml:"endpoint"`
@@ -42,8 +43,7 @@ type Config struct {
 
 var cfg Config
 
-type UploadRequest struct {
-	Filepath string `form:"filepath" query:"filepath"`
+type PasswordRequest struct {
 	Password string `form:"password" query:"password"`
 }
 
@@ -189,14 +189,12 @@ func calculateCounter(start int64, blockSize int64) ([]byte, int64) {
 }
 
 func handleUpload(c echo.Context) error {
-	var req UploadRequest
-	if err := c.Bind(&req); err != nil {
-		return c.String(400, err.Error())
+	rPath := c.Request().URL.Path
+	if rPath == "" {
+		return c.NoContent(400)
 	}
 
-	if req.Filepath == "" {
-		return c.String(400, "The filepath is required")
-	}
+	fPath := cleanFilepath(rPath)
 
 	formFile, err := c.FormFile("file")
 	if err != nil {
@@ -204,7 +202,7 @@ func handleUpload(c echo.Context) error {
 	}
 
 	if !strings.HasPrefix(c.Request().Header.Get("Content-Type"), "multipart/form-data") {
-		return c.String(400, "invalid request Content-Type")
+		return c.String(400, "INVALID_HEADER_CONTENT_TYPE")
 	}
 	file, err := formFile.Open()
 	if err != nil {
@@ -212,7 +210,7 @@ func handleUpload(c echo.Context) error {
 	}
 	defer file.Close()
 
-	if result, err := uploadFileToS3(req.Filepath, file); err != nil {
+	if result, err := uploadFileToS3(encryptFilename(fPath), file); err != nil {
 		_err := err.Error()
 		if aserr, ok := err.(awserr.Error); ok {
 			_err = aserr.Error()
@@ -225,10 +223,16 @@ func handleUpload(c echo.Context) error {
 
 func handleFile(c echo.Context) error {
 	bucket := aws.String(cfg.Storage.Bucket)
-	path := aws.String(c.Request().URL.Path[1:])
+	path := aws.String(cleanFilepath(c.Request().URL.Path))
+
+	if *path == "" {
+		return c.NoContent(404)
+	}
 
 	partialRequest := false
 	statusCode := 200
+
+	*path = encryptFilename(*path)
 
 	headResp, err := client.HeadObject(&s3.HeadObjectInput{
 		Bucket: bucket,
@@ -236,7 +240,7 @@ func handleFile(c echo.Context) error {
 	})
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok && aerr.Code() == "NotFound" {
-			return c.String(404, "file not found")
+			return c.NoContent(404)
 		}
 		return c.String(500, err.Error())
 	}
@@ -292,12 +296,32 @@ func handleFile(c echo.Context) error {
 
 	reader := cipher.StreamReader{S: stream, R: object.Body}
 
-	mimeType := mime.TypeByExtension(filepath.Ext(*path))
+	mimeType := mime.TypeByExtension(filepath.Ext(c.Request().URL.Path))
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}
 
 	return c.Stream(statusCode, mimeType, reader)
+}
+
+func handleDelete(c echo.Context) error {
+	rPath := c.Request().URL.Path
+	if rPath == "" {
+		return c.NoContent(400)
+	}
+
+	fPath := cleanFilepath(rPath)
+	encryptedFilename := encryptFilename(fPath)
+
+	_, err := client.DeleteObject(&s3.DeleteObjectInput{
+		Bucket: aws.String(cfg.Storage.Bucket),
+		Key:    aws.String(encryptedFilename),
+	})
+	if err != nil {
+		return c.String(400, err.Error())
+	}
+
+	return c.String(200, "")
 }
 
 func main() {
@@ -331,7 +355,21 @@ func main() {
 	}
 	app.Use(middleware.Recover(), middleware.Logger())
 
-	app.POST("/upload", handleUpload)
+	app.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+
+			var pr PasswordRequest
+			_ = c.Bind(&pr)
+
+			if cfg.Server.Password != "" && (c.Path() == "/upload" || c.Path() == "/delete") && (pr.Password == "" || pr.Password != cfg.Server.Password) {
+				return c.String(400, "INVALID_PASSWORD")
+			}
+			return next(c)
+		}
+	})
+
+	app.POST("/*", handleUpload)
+	app.DELETE("/*", handleDelete)
 	app.GET("/*", handleFile)
 
 	app.Logger.Info(app.Start(cfg.Server.Addr))
@@ -357,4 +395,12 @@ func setupConfiguration(f string) error {
 	}
 
 	return nil
+}
+
+func cleanFilepath(path string) string {
+	p := filepath.Clean(path)
+	if strings.HasPrefix(p, "/") {
+		return p[1:]
+	}
+	return p
 }

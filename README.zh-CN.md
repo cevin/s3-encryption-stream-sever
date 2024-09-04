@@ -17,8 +17,12 @@
 
 自动加密一个文件并上传到S3 使用AES-256-CTR加密算法
 
+密码可以通过FormData、FormParams和Query发送
+
 ```shell
-curl -F 'file=@/location/file.dat' -F 'filepath=/path/file' http://localhost:8000/upload
+# POST /在S3的路径
+# multipart/form-data
+curl -F 'password=' -F 'file=@/location/file.dat' http://localhost:8000/upload
 ```
 
 ## 下载
@@ -26,6 +30,7 @@ curl -F 'file=@/location/file.dat' -F 'filepath=/path/file' http://localhost:800
 自动下载一个加密文件，在下载的过程中自动解密
 
 ```shell
+# GET /S3路径(加密前)
 curl --output file.dat http://localhost:8000/path/file
 ```
 
@@ -35,6 +40,15 @@ curl --output file.dat http://localhost:8000/path/file
 
 ```shell
 curl -H "Range: bytes=1-2" http://localhost:8000/path/file.txt
+```
+
+## 删除文件
+
+密码可以通过FormData、FormParams和Query发送
+
+```shell
+# DELETE /S3路径(加密前)
+curl -XDELETE http://localhost:8000/path/file[?password=]
 ```
 
 # 配置
@@ -47,6 +61,7 @@ curl -H "Range: bytes=1-2" http://localhost:8000/path/file.txt
 [server]
 addr=":8000"
 key="11111111111111111111111111111111" # 加密密钥 必须是32个字符
+password="密码" # 如果设置 在上传、删除文件时需要传递
 [storage]
 access_id="你的accessid"
 secret="你的密钥"
@@ -60,6 +75,7 @@ region="你的bucket区域"
 [server]
 addr=":8000"
 key="11111111111111111111111111111111" # 必须是32个字符
+password="密码" # 如果设置 在上传、删除文件时需要传递
 [storage]
 enpoint="https://<你的accountid在cloudfalre的R2控制面板可查看到>.r2.cloudflarestorage.com/"
 access_id="你的R2访问key"
@@ -74,6 +90,7 @@ region="auto" # 必须是 auto
 [server]
 addr=":8000"
 key="11111111111111111111111111111111" # must be 32 characters
+password="密码" # 如果设置 在上传、删除文件时需要传递
 [storage]
 enpoint="http://<region>.aliyuncs.com"
 access_id="your access key id"

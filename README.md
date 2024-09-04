@@ -18,8 +18,12 @@ Do not use in production without thorough testing.
 
 Automatically encrypt a file using AES-256-CTR during upload.
 
+The password can be sent through form data, query string and form params.
+
 ```shell
-curl -F 'file=@/location/file.dat' -F 'filepath=/path/file' http://localhost:8000/upload
+# POST /path/file/to/upload
+# multipart/form-data
+curl -F 'password=' -F 'file=@/location/file.dat'  http://localhost:8000/path/file
 ```
 
 ## Download
@@ -27,6 +31,7 @@ curl -F 'file=@/location/file.dat' -F 'filepath=/path/file' http://localhost:800
 Automatically decrypt files during download.
 
 ```shell
+# GET /path/to/file
 curl --output file.dat http://localhost:8000/path/file
 ```
 
@@ -36,6 +41,15 @@ Supports HTTP Range for partial downloads. Classic use cases include streaming m
 
 ```shell
 curl -H "Range: bytes=1-2" http://localhost:8000/path/file.txt
+```
+
+## Delete
+
+The password can be sent through form data, query string and form params.
+
+```shell
+# DELETE /path/to/file
+curl -XDELETE http://localhost:8000/path/file[?password=]
 ```
 
 # Configuration
@@ -48,6 +62,7 @@ Use `toml`
 [server]
 addr=":8000"
 key="11111111111111111111111111111111" # must be 32 characters
+password="THE_PASSWORD" # If a password is set, it must be sent when uploading or deleting files.
 [storage]
 access_id="your access key id"
 secret="your access secret key"
@@ -61,6 +76,7 @@ region="your region"
 [server]
 addr=":8000"
 key="11111111111111111111111111111111" # must be 32 characters
+password="THE_PASSWORD" # If a password is set, it must be sent when uploading or deleting files.
 [storage]
 enpoint="https://<your_account_id_in_cloudfalre_r2_dashboard>.r2.cloudflarestorage.com/"
 access_id="your access key id"
@@ -75,6 +91,7 @@ region="auto" # must be "auto"
 [server]
 addr=":8000"
 key="11111111111111111111111111111111" # must be 32 characters
+password="THE_PASSWORD" # If a password is set, it must be sent when uploading or deleting files.
 [storage]
 enpoint="http://<region>.aliyuncs.com"
 access_id="your access key id"
