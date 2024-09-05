@@ -41,17 +41,19 @@ type Config struct {
 	} `toml:"storage"`
 }
 
-var cfg Config
-
 type PasswordRequest struct {
 	Password string `form:"password" query:"password"`
 }
 
-var IV = make([]byte, aes.BlockSize)
-
 var (
 	client *s3.S3
+	cfg    Config
 )
+
+func generateEncryptIV(name string, size int) []byte {
+	hash := sha256.Sum256([]byte(name))
+	return hash[:size]
+}
 
 func generateEncryptFilenameNonce(name string, size int) []byte {
 	hash := sha256.Sum256([]byte(name))
@@ -73,7 +75,7 @@ func encryptFilename(name string) string {
 	return strings.Join(segments, "/")
 }
 
-func uploadFileToS3(path string, file io.ReadSeeker) (string, error) {
+func uploadFileToS3(path string, file io.Reader) (string, error) {
 
 	bucket := aws.String(cfg.Storage.Bucket)
 	uploadPath := aws.String(path)
@@ -88,15 +90,6 @@ func uploadFileToS3(path string, file io.ReadSeeker) (string, error) {
 	}
 	uploadId := resp.UploadId
 
-	block, err := aes.NewCipher([]byte(cfg.Server.Key))
-	if err != nil {
-		return "", err
-	}
-
-	counter := make([]byte, len(IV))
-	copy(counter, IV)
-	stream := cipher.NewCTR(block, counter)
-
 	var partNumber int64 = 1
 	var completedParts []*s3.CompletedPart
 
@@ -105,9 +98,6 @@ func uploadFileToS3(path string, file io.ReadSeeker) (string, error) {
 		n, err := file.Read(buffer)
 		if n > 0 {
 			part := buffer[:n]
-
-			// encrypt each block data
-			stream.XORKeyStream(part, part)
 
 			partResp, err := client.UploadPart(&s3.UploadPartInput{
 				Bucket:     bucket,
@@ -175,24 +165,6 @@ func parseRangeHeader(rangeHeader string) (int64, int64, error) {
 	return start, end, nil
 }
 
-func calculateCounter(start int64, blockSize int64) ([]byte, int64) {
-
-	counter := make([]byte, len(IV))
-	copy(counter, IV)
-
-	blockOffset := start / blockSize
-	ctrOffset := start % blockSize
-
-	// counter align
-	binaryCounter := make([]byte, 8)
-	binaryCounter[7] = byte(blockOffset & 0xFF)
-	binaryCounter[6] = byte((blockOffset >> 8) & 0xFF)
-	binaryCounter[5] = byte((blockOffset >> 16) & 0xFF)
-	binaryCounter[4] = byte((blockOffset >> 24) & 0xFF)
-	copy(counter[8:], binaryCounter)
-	return counter, ctrOffset
-}
-
 func handleUpload(c echo.Context) error {
 	rPath := c.Request().URL.Path
 	if rPath == "" {
@@ -215,7 +187,11 @@ func handleUpload(c echo.Context) error {
 	}
 	defer file.Close()
 
-	if result, err := uploadFileToS3(encryptFilename(fPath), file); err != nil {
+	block, _ := aes.NewCipher([]byte(cfg.Server.Key))
+	ctr := cipher.NewCTR(block, generateEncryptIV(fPath, aes.BlockSize))
+	stream := cipher.StreamReader{S: ctr, R: file}
+
+	if result, err := uploadFileToS3(encryptFilename(fPath), stream); err != nil {
 		_err := err.Error()
 		if aserr, ok := err.(awserr.Error); ok {
 			_err = aserr.Error()
@@ -228,7 +204,9 @@ func handleUpload(c echo.Context) error {
 
 func handleFile(c echo.Context) error {
 	bucket := aws.String(cfg.Storage.Bucket)
-	path := aws.String(cleanFilepath(c.Request().URL.Path))
+	rPath := c.Request().URL.Path
+	fPath := cleanFilepath(rPath)
+	path := aws.String(fPath)
 
 	if *path == "" {
 		return c.NoContent(404)
@@ -288,16 +266,19 @@ func handleFile(c echo.Context) error {
 	}
 	defer object.Body.Close()
 
+	// adjust skip blocks
 	block, err := aes.NewCipher([]byte(cfg.Server.Key))
 	if err != nil {
 		return c.String(500, err.Error())
 	}
+	stream := cipher.NewCTR(block, generateEncryptIV(fPath, aes.BlockSize))
 
-	counter, offset := calculateCounter(start, int64(aes.BlockSize))
-	stream := cipher.NewCTR(block, counter)
+	skipBlocks := start / aes.BlockSize
 
-	skip := make([]byte, offset)
-	stream.XORKeyStream(skip, skip)
+	emptyBlock := make([]byte, aes.BlockSize)
+	for i := 0; i < int(skipBlocks); i++ {
+		stream.XORKeyStream(emptyBlock, emptyBlock)
+	}
 
 	reader := cipher.StreamReader{S: stream, R: object.Body}
 
