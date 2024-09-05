@@ -65,10 +65,9 @@ func encryptFilename(name string) string {
 	block, _ := aes.NewCipher([]byte(cfg.Server.Key))
 	encoder, _ := cipher.NewGCM(block)
 
-	nonce := generateEncryptFilenameNonce(name, encoder.NonceSize())
-
 	segments := strings.Split(name, "/")
 	for i := range segments {
+		nonce := generateEncryptFilenameNonce(segments[i], encoder.NonceSize())
 		segments[i] = base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(encoder.Seal(nonce, nonce, []byte(segments[i]), nil))
 	}
 
