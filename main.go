@@ -53,16 +53,21 @@ var (
 	client *s3.S3
 )
 
-func generateEncryptFilenameNonce(name string) []byte {
+func generateEncryptFilenameNonce(name string, size int) []byte {
 	hash := sha256.Sum256([]byte(name))
-	return hash[:16]
+	return hash[:size]
 }
 
 func encryptFilename(name string) string {
+
+	block, _ := aes.NewCipher([]byte(cfg.Server.Key))
+	encoder, _ := cipher.NewGCM(block)
+
+	nonce := generateEncryptFilenameNonce(name, encoder.NonceSize())
+
 	segments := strings.Split(name, "/")
 	for i := range segments {
-		hash := sha256.Sum256([]byte(segments[i] + cfg.Server.Key))
-		segments[i] = strings.ReplaceAll(base64.URLEncoding.EncodeToString(hash[:]), "=", "")
+		segments[i] = base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(encoder.Seal(nonce, nonce, []byte(segments[i]), nil))
 	}
 
 	return strings.Join(segments, "/")
