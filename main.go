@@ -47,7 +47,7 @@ type PasswordRequest struct {
 	Password string `form:"password" query:"password"`
 }
 
-var IV = make([]byte, 16)
+var IV = make([]byte, aes.BlockSize)
 
 var (
 	client *s3.S3
@@ -366,7 +366,7 @@ func main() {
 			var pr PasswordRequest
 			_ = c.Bind(&pr)
 
-			if cfg.Server.Password != "" && (c.Path() == "/upload" || c.Path() == "/delete") && (pr.Password == "" || pr.Password != cfg.Server.Password) {
+			if cfg.Server.Password != "" && (c.Request().Method == "POST" || c.Request().Method == "DELETE") && (pr.Password == "" || pr.Password != cfg.Server.Password) {
 				return c.String(400, "INVALID_PASSWORD")
 			}
 			return next(c)
