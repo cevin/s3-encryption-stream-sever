@@ -191,7 +191,9 @@ func handleUpload(c echo.Context) error {
 	ctr := cipher.NewCTR(block, generateEncryptIV(fPath, aes.BlockSize))
 	stream := cipher.StreamReader{S: ctr, R: file}
 
-	if result, err := uploadFileToS3(encryptFilename(fPath), stream); err != nil {
+	encryptedFilename := encryptFilename(fPath)
+
+	if result, err := uploadFileToS3(encryptedFilename, stream); err != nil {
 		_err := err.Error()
 		if aserr, ok := err.(awserr.Error); ok {
 			_err = aserr.Error()
@@ -354,6 +356,9 @@ func main() {
 		}
 	})
 
+	app.GET("/favicon.ico", func(c echo.Context) error {
+		return c.NoContent(204)
+	})
 	app.POST("/*", handleUpload)
 	app.DELETE("/*", handleDelete)
 	app.GET("/*", handleFile)
